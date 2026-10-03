@@ -1,0 +1,10 @@
+# Ignore temporary local keys and system files
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+.DS_Store
+Thumbs.db
+.env
+*.env
+

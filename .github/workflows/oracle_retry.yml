@@ -1,0 +1,79 @@
+name: Oracle Instance Auto-Retry
+
+on:
+  schedule:
+    # Runs every 15 minutes
+    - cron: '*/15 * * * *'
+  # Allows manual execution via GitHub UI
+  workflow_dispatch:
+
+concurrency:
+  group: oracle-arm-creation
+  cancel-in-progress: false
+
+jobs:
+  retry-create-instance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install OCI CLI
+        run: |
+          echo "Installing official OCI CLI..."
+          bash -c "$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)" -- --accept-all-defaults
+          echo "$HOME/bin" >> $GITHUB_PATH
+          export PATH="$HOME/bin:$PATH"
+          oci --version
+
+      - name: Configure OCI CLI
+        env:
+          OCI_USER: ${{ secrets.OCI_CLI_USER }}
+          OCI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+          OCI_REGION: ${{ secrets.OCI_CLI_REGION }}
+          OCI_KEY: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+          SSH_PUB_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+        run: |
+          mkdir -p ~/.oci
+          mkdir -p ~/.ssh
+
+          # Write private key file
+          echo "$OCI_KEY" > ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
+
+          # Configure OCI CLI profile
+          cat <<EOF > ~/.oci/config
+          [DEFAULT]
+          user=$OCI_USER
+          fingerprint=$OCI_FINGERPRINT
+          key_file=~/.oci/oci_api_key.pem
+          tenancy=$OCI_TENANCY
+          region=$OCI_REGION
+          EOF
+          chmod 600 ~/.oci/config
+
+          # Save SSH Public Key if provided
+          if [ -n "$SSH_PUB_KEY" ]; then
+            echo "$SSH_PUB_KEY" > ~/.ssh/id_rsa.pub
+            chmod 644 ~/.ssh/id_rsa.pub
+          fi
+
+          echo "OCI CLI configured successfully."
+
+      - name: Run Instance Creation Script
+        env:
+          OCI_CLI_AUTH: "api_key"
+          OCI_COMPARTMENT_ID: ${{ secrets.OCI_COMPARTMENT_ID || secrets.OCI_CLI_TENANCY }}
+          OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
+          OCI_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}
+          OCI_AVAILABILITY_DOMAIN: ${{ secrets.OCI_AVAILABILITY_DOMAIN || 'ZptL:AP-SINGAPORE-1-AD-1' }}
+          OCI_DISPLAY_NAME: ${{ secrets.OCI_DISPLAY_NAME || 'ARM-Server' }}
+          OCI_HOSTNAME: ${{ secrets.OCI_HOSTNAME || 'arm-server' }}
+          OCI_OCPUS: ${{ secrets.OCI_OCPUS || '1' }}
+          OCI_MEMORY_IN_GBS: ${{ secrets.OCI_MEMORY_IN_GBS || '6' }}
+        run: |
+          chmod +x create_instance_retry.sh
+          ./create_instance_retry.sh
